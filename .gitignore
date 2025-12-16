@@ -1,0 +1,15 @@
+# Build artifacts
+bin/
+obj/
+*.o
+
+# Generated files
+network_map.html
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
