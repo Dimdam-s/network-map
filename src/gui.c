@@ -30,7 +30,13 @@ void run_gui(scan_context_t *ctx) {
     camera.target = (Vector2){ 0, 0 };
 
     int gateway_idx = -1;
+
     float time_accum = 0.0f; // Pour animations
+    
+    // Search State
+    char searchBuffer[64] = {0};
+    int searchLen = 0;
+    bool searchActive = false;
 
     while (!WindowShouldClose()) {
         float dt = GetFrameTime();
@@ -49,6 +55,7 @@ void run_gui(scan_context_t *ctx) {
             SetMouseCursor(MOUSE_CURSOR_DEFAULT);
         }
         
+
         // Zoom Mouse Wheel
         float wheel = GetMouseWheelMove();
         if (wheel != 0) {
@@ -59,6 +66,25 @@ void run_gui(scan_context_t *ctx) {
             camera.zoom += (wheel * zoomSpeed);
             if (camera.zoom < 0.1f) camera.zoom = 0.1f;
             if (camera.zoom > 5.0f) camera.zoom = 5.0f;
+        }
+
+        // --- SEARCH INPUT ---
+        int key = GetCharPressed();
+        while (key > 0) {
+            if ((key >= 32) && (key <= 125) && (searchLen < 63)) {
+                searchBuffer[searchLen] = (char)key;
+                searchBuffer[searchLen+1] = '\0';
+                searchLen++;
+                searchActive = true;
+            }
+            key = GetCharPressed();
+        }
+        if (IsKeyPressed(KEY_BACKSPACE)) {
+            if (searchLen > 0) {
+                searchLen--;
+                searchBuffer[searchLen] = '\0';
+                if (searchLen == 0) searchActive = false;
+            }
         }
 
         // --- PHYSICS ---
@@ -203,21 +229,56 @@ void run_gui(scan_context_t *ctx) {
                     if (isGateway) {
                         coreColor = GOLD;
                         glowColor = Fade(ORANGE, 0.4f);
+
                         DrawCircleV(pos, NODE_RADIUS * 2.5f + pulse, Fade(glowColor, 0.2f)); 
                     } else {
                         if (ctx->devices[i].rtt_ms < 5) { coreColor = GREEN; glowColor = Fade(LIME, 0.3f); }
                         else if (ctx->devices[i].rtt_ms > 100) { coreColor = RED; glowColor = Fade(MAROON, 0.3f); }
                     }
 
-                    if (i == hoveredNode) {
-                        coreColor = WHITE;
-                        radiusVar = 5.0f;
-                        glowColor = Fade(WHITE, 0.5f);
+                    // SEARCH FILTER
+                    int match = 1;
+                    if (searchActive) {
+                        // Case insensitive search logic could be better, but strstr is okay for now
+                        // Let's make it simpler: Check if substring exists
+                        // To allow better search we often convert both to lower, but let's stick to direct match or simple improvement
+                        // TODO: strcasestr is strict C, might need _GNU_SOURCE. Let's iterate.
+                        
+                        // Simple custom case-insensitive check or just assuming exact/partial match
+                        // Or we duplicate buffers to lowercase
+                        
+                        // For simplicity, let's assume Case Sensitive for now OR use a helper if we had one.
+                        // Actually, users hate case sensitive. Let's do a poor man's contains loop or just use strcasestr if available.
+                        // Linux Usually has strcasestr with _GNU_SOURCE but we are standard.
+                        // Let's copy to stack temp buffers.
+                        
+                        // BUT: We don't want to alloc in draw loop.
+                        // Let's stick to strstr for now (Case Sensitive) to be safe on compile, 
+                        // unless user complains or we add a helper.
+                        // ACTUALLY, let's just use strcasestr, usually available in <string.h> with _GNU_SOURCE defined.
+                        // If not, we fall back. Let's try to be smart.
+                        
+                        // Fallback: Check IP (always numbers/dots) + Hostname
+                        if (strstr(ctx->devices[i].ip_str, searchBuffer) == NULL && 
+                            strstr(ctx->devices[i].hostname, searchBuffer) == NULL) {
+                            match = 0;
+                        }
+                    }
+
+                    if (!match && !isGateway) {
+                        coreColor = Fade(coreColor, 0.05f);
+                        glowColor = Fade(glowColor, 0.02f);
+                    } else {
+                         if (i == hoveredNode) {
+                            coreColor = WHITE;
+                            radiusVar = 5.0f;
+                            glowColor = Fade(WHITE, 0.5f);
+                        }
                     }
 
                     DrawCircleV(pos, NODE_RADIUS + 8.0f + pulse + radiusVar, glowColor);
                     DrawCircleV(pos, NODE_RADIUS + radiusVar, coreColor);
-                    DrawCircleLines(pos.x, pos.y, NODE_RADIUS + radiusVar, WHITE);
+                    DrawCircleLines(pos.x, pos.y, NODE_RADIUS + radiusVar, match ? WHITE : Fade(WHITE, 0.1f));
                 }
 
                 // 3. Labels (seulement si pas trop zoomé out, ou si hover)
@@ -285,6 +346,21 @@ void run_gui(scan_context_t *ctx) {
             DrawText("[L/R-Click]: MOVE | [Hover]: INFO", 25, 85, 10, LIGHTGRAY);
             
             DrawFPS(SCREEN_WIDTH - 80, 10);
+
+            // SEARCH BAR UI
+            int searchBoxW = 300;
+            int searchBoxX = SCREEN_WIDTH/2 - searchBoxW/2;
+            int searchBoxY = 20;
+            DrawRectangle(searchBoxX, searchBoxY, searchBoxW, 40, Fade(BLACK, 0.8f));
+            
+            Color bordColor = searchActive ? GREEN : GRAY;
+            DrawRectangleLines(searchBoxX, searchBoxY, searchBoxW, 40, bordColor);
+            
+            if (searchLen > 0) {
+                 DrawText(searchBuffer, searchBoxX + 10, searchBoxY + 10, 20, WHITE);
+            } else {
+                 DrawText("Search IP/Name...", searchBoxX + 10, searchBoxY + 10, 20, Fade(GRAY, 0.5f));
+            }
 
         EndDrawing();
     }
