@@ -12,13 +12,11 @@ typedef struct {
     double rtt_ms;
     int active;
     
-    // Spoofing State
     int is_being_spoofed;
     char spoof_domain[256];
     char spoof_redirect_ip[INET_ADDRSTRLEN];
-    void *spoof_data; // Pointer to spoof_session_t (void* to avoid circular dependency or full include in header)
+    void *spoof_data;
 
-    // Monitoring
     int missed_scans;
 } device_t;
 
@@ -26,7 +24,6 @@ void get_device_hostname(struct in_addr ip, char *hostname, size_t len);
 void get_device_mac(const char *ip_str, char *mac_addr, size_t len);
 void get_mac_vendor(const char *mac_addr, char *vendor, size_t len);
 
-// Nouvelle fonction d'init
 void init_oui_db();
 void cleanup_oui_db();
 

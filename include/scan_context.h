@@ -8,33 +8,30 @@
 
 #define MAX_DEVICES 256
 
-// Extension de la structure device pour la GUI
 typedef struct {
-    float x, y;         // Position actuelle
-    float target_x, target_y; // Position cible (force-directed)
+    float x, y;
+    float target_x, target_y;
     float mass;
     bool dragging;
 } device_gui_props_t;
 
 typedef struct {
-    uint32_t start_ip_val; // Pour reset le loop
+    uint32_t start_ip_val;
     uint32_t current_ip;
     uint32_t end_ip;
     pthread_mutex_t lock;
     
     device_t devices[MAX_DEVICES];
-    device_gui_props_t gui_props[MAX_DEVICES]; // Propriétés GUI parallèles
+    device_gui_props_t gui_props[MAX_DEVICES];
     int device_count;
     pthread_mutex_t list_lock;
 
-    bool active; // Flag pour arrêter les threads
+    bool active;
     char gateway_ip[16];
     
-    // Threading
     int thread_count;
-    pthread_t *threads; // Tableau dynamique
+    pthread_t *threads;
 
-    // Thread Manager (Async updates)
     pthread_t manager_thread;
     bool manager_active;
     bool restart_requested;
@@ -42,7 +39,6 @@ typedef struct {
     bool is_updating;
 } scan_context_t;
 
-// Thread Management Functions
 void init_scan_manager(scan_context_t *ctx);
 void shutdown_scan_manager(scan_context_t *ctx);
 void request_thread_update(scan_context_t *ctx, int new_count);

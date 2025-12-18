@@ -16,7 +16,6 @@ int main(int argc, char *argv[]) {
     if (geteuid() != 0) {
         printf("INFO: Elevation required. Restarting with sudo...\n");
         
-        // Prepare argument list for execvp
         char **new_argv = malloc(sizeof(char *) * (argc + 2));
         new_argv[0] = "sudo";
         for (int i = 0; i < argc; i++) {
@@ -26,14 +25,12 @@ int main(int argc, char *argv[]) {
         
         execvp("sudo", new_argv);
         
-        // If execvp fails
         perror("sudo execvp");
         free(new_argv);
         return 1;
     }
 
-    // --- CLI PARSING ---
-    int thread_count = 50; // default
+    int thread_count = 50;
     int opt;
     while ((opt = getopt(argc, argv, "t:")) != -1) {
         switch (opt) {
@@ -59,10 +56,8 @@ int main(int argc, char *argv[]) {
     struct in_addr start_ip, end_ip;
     get_network_range(info.ip_addr_obj, info.netmask_obj, &start_ip, &end_ip);
 
-    // Initialisation DB OUI
     init_oui_db();
 
-    // Initialisation du contexte
     scan_context_t ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.start_ip_val = ntohl(start_ip.s_addr);
@@ -72,21 +67,17 @@ int main(int argc, char *argv[]) {
     ctx.active = true;
     ctx.thread_count = thread_count;
     
-    // Gateway
     if (get_gateway_ip(ctx.gateway_ip) != 0) {
-        strcpy(ctx.gateway_ip, "192.168.1.1"); // Fallback
+        strcpy(ctx.gateway_ip, "192.168.1.1");
     }
 
     pthread_mutex_init(&ctx.lock, NULL);
     pthread_mutex_init(&ctx.list_lock, NULL);
 
-    // Lancement du manager (qui lance les threads)
     init_scan_manager(&ctx);
 
-    // Lancement de la GUI (Bloquant jusqu'à la fermeture de la fenêtre)
     run_gui(&ctx);
 
-    // Fermeture
     shutdown_scan_manager(&ctx);
 
     pthread_mutex_destroy(&ctx.lock);
