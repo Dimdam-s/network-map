@@ -7,37 +7,34 @@
 #include "network_scan.h"
 #include "icmp_scanner.h"
 #include "device.h"
-#include "web_export.h"
+#include "scan_context.h"
+#include "gui.h"
 
 #define MAX_THREADS 50
-#define MAX_DEVICES 256
 
-// Structure partagée pour les threads
-typedef struct {
-    uint32_t current_ip;
-    uint32_t end_ip;
-    pthread_mutex_t lock;
-    
-    device_t devices[MAX_DEVICES];
-    int device_count;
-    pthread_mutex_t list_lock;
-} scan_context_t;
-
+// Thread de scan révisé
 void *scan_thread(void *arg) {
     scan_context_t *ctx = (scan_context_t *)arg;
     
-    while (1) {
+    while (ctx->active) {
         struct in_addr target_ip;
         
-        // Récupérer la prochaine IP à scanner de manière thread-safe
+        // Récupérer la prochaine IP à scanner
         pthread_mutex_lock(&ctx->lock);
         if (ctx->current_ip > ctx->end_ip) {
+            // Si on a fini le scan, on arrête pour l'instant
             pthread_mutex_unlock(&ctx->lock);
-            break;
+            
+            // Attendre un peu avant de tuer le thread
+            usleep(100000); 
+            break; 
         }
         target_ip.s_addr = htonl(ctx->current_ip);
         ctx->current_ip++;
         pthread_mutex_unlock(&ctx->lock);
+
+        // Check active again
+        if (!ctx->active) break;
 
         // Scan
         double rtt = ping_host(target_ip, 500); // 500ms timeout
@@ -48,11 +45,13 @@ void *scan_thread(void *arg) {
             new_device.rtt_ms = rtt;
             inet_ntop(AF_INET, &target_ip, new_device.ip_str, INET_ADDRSTRLEN);
             
+            // Si l'app est fermée entre temps
+            if (!ctx->active) break;
+
             // Récupération des infos supplémentaires
             get_device_hostname(target_ip, new_device.hostname, sizeof(new_device.hostname));
             get_device_mac(new_device.ip_str, new_device.mac_addr, sizeof(new_device.mac_addr));
 
-            // Tentative d'enrichissement du nom si "Inconnu"
             if (strcmp(new_device.hostname, "Inconnu") == 0) {
                 char vendor[64];
                 get_mac_vendor(new_device.mac_addr, vendor, sizeof(vendor));
@@ -61,11 +60,28 @@ void *scan_thread(void *arg) {
                 }
             }
 
-            // Ajout à la liste des résultats
+            // Ajout à la liste
             pthread_mutex_lock(&ctx->list_lock);
             if (ctx->device_count < MAX_DEVICES) {
-                ctx->devices[ctx->device_count++] = new_device;
-                printf("[+] Trouvé: %-15s | %-20s | %.2f ms\n", new_device.ip_str, new_device.hostname, rtt);
+                // Vérifier doublons
+                int exists = 0;
+                for(int i=0; i<ctx->device_count; i++) {
+                     if(strcmp(ctx->devices[i].ip_str, new_device.ip_str) == 0) {
+                         // Mise à jour RTT
+                         ctx->devices[i].rtt_ms = rtt;
+                         exists = 1; 
+                         break;
+                     }
+                }
+
+                if (!exists) {
+                    ctx->devices[ctx->device_count] = new_device;
+                    // Init GUI props
+                    ctx->gui_props[ctx->device_count].x = 0;
+                    ctx->gui_props[ctx->device_count].y = 0;
+                    ctx->device_count++;
+                    printf("[+] Trouvé: %-15s | %s\n", new_device.ip_str, new_device.hostname);
+                }
             }
             pthread_mutex_unlock(&ctx->list_lock);
         }
@@ -79,7 +95,7 @@ int main() {
         return 1;
     }
 
-    printf("=== Network Map Scanner (Multi-threaded) ===\n");
+    printf("=== Network Map Live (Raylib) ===\n");
 
     local_iface_info_t info;
     if (get_local_network_info(&info) != 0) {
@@ -87,37 +103,25 @@ int main() {
         return 1;
     }
 
-    char gateway_ip[INET_ADDRSTRLEN] = "Inconnu";
-    if (get_gateway_ip(gateway_ip) == 0) {
-        printf("Passerelle (Routeur): %s\n", gateway_ip);
-    } else {
-        printf("Passerelle: Non détectée\n");
-    }
-
-    printf("Interface: %s\n", info.interface_name);
-    printf("IP Locale: %s\n", info.ip_address);
-    printf("Masque   : %s\n", info.netmask);
-
     struct in_addr start_ip, end_ip;
     get_network_range(info.ip_addr_obj, info.netmask_obj, &start_ip, &end_ip);
 
-    char start_str[INET_ADDRSTRLEN];
-    char end_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &start_ip, start_str, INET_ADDRSTRLEN);
-    inet_ntop(AF_INET, &end_ip, end_str, INET_ADDRSTRLEN);
-
-    printf("Plage de scan: %s - %s\n", start_str, end_str);
-    printf("Démarrage du scan avec %d threads...\n\n", MAX_THREADS);
-
-    // Initialisation du contexte de scan
+    // Initialisation du contexte
     scan_context_t ctx;
     ctx.current_ip = ntohl(start_ip.s_addr);
     ctx.end_ip = ntohl(end_ip.s_addr);
     ctx.device_count = 0;
+    ctx.active = true;
+    
+    // Gateway
+    if (get_gateway_ip(ctx.gateway_ip) != 0) {
+        strcpy(ctx.gateway_ip, "192.168.1.1"); // Fallback
+    }
+
     pthread_mutex_init(&ctx.lock, NULL);
     pthread_mutex_init(&ctx.list_lock, NULL);
 
-    // Création des threads
+    // Lancement des threads de scan
     pthread_t threads[MAX_THREADS];
     for (int i = 0; i < MAX_THREADS; i++) {
         if (pthread_create(&threads[i], NULL, scan_thread, &ctx) != 0) {
@@ -125,33 +129,19 @@ int main() {
         }
     }
 
-    // Attente de la fin des threads
+    // Lancement de la GUI (Bloquant jusqu'à la fermeture de la fenêtre)
+    run_gui(&ctx);
+
+    // Fermeture
+    printf("Arrêt des scans...\n");
+    ctx.active = false; 
+    
     for (int i = 0; i < MAX_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
 
     pthread_mutex_destroy(&ctx.lock);
     pthread_mutex_destroy(&ctx.list_lock);
-
-    // Affichage de la carte finale console
-    printf("\n=== CARTE DU RÉSEAU ===\n");
-    printf("%-16s | %-18s | %-8s | %s\n", "Adresse IP", "Adresse MAC", "Latence", "Nom d'hôte");
-    printf("--------------------------------------------------------------------------------\n");
     
-    for (int i = 0; i < ctx.device_count; i++) {
-        printf("%-16s | %-18s | %6.2f ms | %s\n", 
-            ctx.devices[i].ip_str, 
-            ctx.devices[i].mac_addr, 
-            ctx.devices[i].rtt_ms,
-            ctx.devices[i].hostname);
-    }
-    printf("--------------------------------------------------------------------------------\n");
-    printf("Total appareils trouvés: %d\n", ctx.device_count);
-
-    // Export HTML
-    export_to_html("network_map.html", ctx.devices, ctx.device_count, gateway_ip);
-    printf("\n[OK] Carte visuelle générée : network_map.html\n");
-    printf("Ouvrez ce fichier dans votre navigateur pour voir le graphe.\n");
-
     return 0;
 }
