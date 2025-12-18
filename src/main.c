@@ -117,9 +117,24 @@ void *scan_thread(void *arg) {
     return NULL;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
     if (geteuid() != 0) {
-        fprintf(stderr, "Erreur: Ce programme nécessite les droits root (sudo) pour utiliser les Raw Sockets.\n");
+        printf("INFO: Elevation required. Restarting with sudo...\n");
+        
+        // Prepare argument list for execvp
+        // "sudo", "./bin/network-map", args..., NULL
+        char **new_argv = malloc(sizeof(char *) * (argc + 2));
+        new_argv[0] = "sudo";
+        for (int i = 0; i < argc; i++) {
+            new_argv[i + 1] = argv[i];
+        }
+        new_argv[argc + 1] = NULL;
+        
+        execvp("sudo", new_argv);
+        
+        // If execvp fails
+        perror("sudo execvp");
+        free(new_argv);
         return 1;
     }
 
