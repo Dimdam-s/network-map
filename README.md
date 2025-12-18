@@ -1,88 +1,81 @@
 # Network Map Live
 
-A real-time, visual network scanner and mapper application built in C using [Raylib](https://www.raylib.com/).
-It automatically scans your local network, discovers devices/hosts, and visualizes them in a dynamic, physics-based graph.
-
-![Network Map Screenshot](screenshot.png)
+A real-time, visual network scanner and mapper application. It visualizes your network topology, latency, and devices in a physics-based graph.
 
 ## Features
 
-### 🔍 Live Network Discovery
-- **Continuous Scanning**: Automatically discovers new devices and updates the status of existing ones.
-- **Disconnection Detection**: Devices that stop responding fade out and are marked as "Inactive".
-- **Dynamic Threading**: Adjust the scanning speed in real-time via the GUI or on startup via CLI.
+-   **Visual Mapping**: Hosts are displayed as nodes linked to a central gateway.
+-   **Live Discovery**: Continuous scanning detects new devices and disconnections.
+-   **Ethical Hacking Tools**:
+    -   **DNS Spoofing**: Redirect traffic.
+    -   **Distributed Stress Test**: Use multiple "Drone" machines to generate load on a target.
 
-### 🎨 Visualizations
-- **Physics-Based Layout**: Nodes self-organize around a central gateway.
-- **Latency Indicators**:
-  - Distance from Gateway correlates to Ping/RTT.
-  - Link colors indicate connection quality (Green < 5ms, Blue < 100ms, Red > 100ms).
+## Installation & Usage
 
-### 🛠️ Advanced Tools (Ethical Hacking)
-> [!WARNING]
-> This tool includes features for **ARP Poisoning** and **DNS Spoofing**. Use these features **ONLY** on networks you own or have explicit permission to audit. Unauthorized network manipulation is illegal.
+### 🐧 Linux (Recommended)
 
-- **DNS Spoofing & ARP Poisoning**:
-    - Select any target device (except Gateway).
-    - Redirect DNS queries for specific domains (e.g. `google.com`) to a custom IP address.
-    - Real-time attack status visualization (Target turns **PURPLE**).
+Requires `sudo`.
 
-### 🏷️ Identification
-- **Name Resolution**: DNS (Reverse Lookup) & NetBIOS (`nmblookup`).
-- **OUI Lookup**: Automatic MAC Vendor identification.
-
-## Requirements
-
-The application runs on Linux. It requires root privileges (`sudo`) to use Raw Sockets for ICMP scanning and ARP manipulation.
-
-### Dependencies (Debian/Ubuntu)
-
-```bash
-sudo apt update
-sudo apt install build-essential git samba-common-bin \
-    libasound2-dev libx11-dev libxrandr-dev libxi-dev \
-    libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev \
-    libxinerama-dev libwayland-dev libxkbcommon-dev
-```
-
-## Installation
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/yourusername/network-map.git
-   cd network-map
-   ```
-
-2.  **Compile**:
+1.  **Dependencies**:
+    ```bash
+    sudo apt install build-essential libraylib-dev
+    # (See source/Makefile for full list if building from scratch)
+    ```
+2.  **Build & Run**:
     ```bash
     make
+    sudo ./bin/network-map
     ```
 
-## Usage
+### 🪟 Windows (Native - Drone Only)
 
-Run the application with `sudo`:
+You can use Windows machines as **Drones** (Stress Test Agents) without any VM or WSL.
 
+1.  **Install MinGW/GCC**: Ensure `gcc` is available in your command prompt.
+2.  **Compile**:
+    -   Double-click `compile_drone.bat`.
+    -   *Or run:* `gcc src/windows_drone.c -o drone.exe -lws2_32`
+
+### 🪟 Windows (Full GUI)
+
+To run the **Master GUI** on Windows, you **MUST** use [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install).
+
+## Distributed Cluster Mode
+
+### 1. External / Internet Deployment (WAN)
+
+For drones outside your local network (e.g., Internet, different Subnet).
+
+**On Master (Your Machine):**
+1.  Forward UDP Port **7123** on your router to your machine.
+2.  Run the GUI: `sudo ./bin/network-map`
+3.  The Master passively listens for "Heartbeats".
+
+**On Drones (Remote Machines):**
+Run the drone executable with the `-m` (Master) argument. They will "Phone Home" every 5 seconds.
+
+*Linux:*
 ```bash
-# Default (50 threads)
-sudo ./bin/network-map
-
-# Custom thread count (e.g. 100 threads for faster scanning)
-sudo ./bin/network-map -t 100
+sudo ./bin/network-map -d -m <YOUR_PUBLIC_IP>
 ```
 
-### Controls
+*Windows:*
+```cmd
+drone.exe -m <YOUR_PUBLIC_IP>
+```
+*Note: Ensure "drone.exe" is allowed through Windows Firewall.*
 
-| Action | Result |
-| :--- | :--- |
-| **Left Click (Node)** | Open **DNS Spoofing Panel** (Select Target). |
-| **Left Click (Gateway)** | Locked (Cannot be spoofed). |
-| **Left/Right Drag** | Pan the camera. |
-| **Mouse Wheel** | Zoom In/Out. |
-| **HUD [+] / [-]** | Increase/Decrease scanning threads in real-time. |
-| **ESC** | Exit the application. |
+### 2. Local LAN (Automatic Discovery)
 
-## Troubleshooting
+If Drones are on the same WiFi/Ethernet, you don't need `-m`. The Master sends a Discovery Broadcast.
+1.  Start Drones with just `./drone.exe` or `./network-map -d`.
+2.  On Master GUI, click `[SCAN]` under "Drones: 0" to detect them.
 
--   **Freeze/Crash on Startup?** Ensure you are running with `sudo`.
--   **No Hostnames?** Some devices firewall ICMP/NetBIOS.
--   **Spoofing Not Working?** Ensure IP Forwarding is enabled on your machine (`sysctl -w net.ipv4.ip_forward=1` is usually handled, but good to check).
+### Launching Attack
+
+1.  Observe "Drones: N" count in HUD (Increases automatically as Heartbeats arrive).
+2.  Select a target node.
+3.  Click **"LAUNCH CLUSTER ATTACK"**.
+
+> [!WARNING]
+> Use this software responsibly. Only perform tests on networks you own.

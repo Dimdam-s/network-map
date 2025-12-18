@@ -9,6 +9,7 @@
 #include "device.h"
 #include "scan_context.h"
 #include "gui.h"
+#include "cluster.h"
 
 #define MAX_THREADS 255
 
@@ -30,19 +31,35 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    int thread_count = 50;
+    int thread_count = 50; // default
+    int drone_mode = 0;
+    char master_ip[64] = {0};
+    
     int opt;
-    while ((opt = getopt(argc, argv, "t:")) != -1) {
+    while ((opt = getopt(argc, argv, "t:dm:")) != -1) {
         switch (opt) {
         case 't':
             thread_count = atoi(optarg);
             if (thread_count < 1) thread_count = 1;
             if (thread_count > 255) thread_count = 255;
             break;
+        case 'd': 
+            drone_mode = 1;
+            break;
+        case 'm':
+            strncpy(master_ip, optarg, 63);
+            drone_mode = 1; // Implies drone mode
+            break;
         default:
-            fprintf(stderr, "Usage: %s [-t threads]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-t threads] [-d] [-m master_ip]\n", argv[0]);
             return 1;
         }
+    }
+    
+    if (drone_mode) {
+         #include "cluster.h"
+         run_drone_mode(master_ip); // Now accepts IP
+         return 0;
     }
 
     printf("=== Network Map Live (Raylib) ===\n");
@@ -70,6 +87,11 @@ int main(int argc, char *argv[]) {
     if (get_gateway_ip(ctx.gateway_ip) != 0) {
         strcpy(ctx.gateway_ip, "192.168.1.1");
     }
+
+    // Init Cluster Master
+    init_cluster_manager();
+    // Auto discovery at start
+    discover_drones();
 
     pthread_mutex_init(&ctx.lock, NULL);
     pthread_mutex_init(&ctx.list_lock, NULL);
