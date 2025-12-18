@@ -179,13 +179,10 @@ void *master_listener_func(void *arg) {
     int len = recvfrom(master_sock, &pkt, sizeof(pkt), 0,
                        (struct sockaddr *)&sender, &sender_len);
     if (len > 0) {
-      // Debug Log
-      char *s_ip = inet_ntoa(sender.sin_addr);
-      printf("CLUSTER DBG: Recv Packet from %s (Cmd: %d)\n", s_ip, pkt.cmd);
-
       if (pkt.magic == CLUSTER_MAGIC) {
         // Handle Responses
         if (pkt.cmd == CMD_OFFER || pkt.cmd == CMD_HEARTBEAT) {
+          char *s_ip = inet_ntoa(sender.sin_addr);
           add_drone_safe(s_ip);
         }
       }
@@ -194,7 +191,22 @@ void *master_listener_func(void *arg) {
   return NULL;
 }
 
+// --- FIREWALL HELPER ---
+void configure_firewall() {
+  printf("CLUSTER: Ensuring Firewall port 7123/UDP is open...\n");
+  // Try UFW (Ubuntu/Debian standard)
+  int ret = system("ufw allow 7123/udp > /dev/null 2>&1");
+  if (ret != 0) {
+    // Fallback to IPTables if UFW missing or failed
+    // Check if rule exists to avoid duplication
+    system("iptables -C INPUT -p udp --dport 7123 -j ACCEPT 2>/dev/null || "
+           "iptables -I INPUT -p udp --dport 7123 -j ACCEPT");
+  }
+}
+
 void init_cluster_manager() {
+  configure_firewall();
+
   master_sock = socket(AF_INET, SOCK_DGRAM, 0);
   int broadcast = 1;
   setsockopt(master_sock, SOL_SOCKET, SO_BROADCAST, &broadcast,
@@ -211,9 +223,6 @@ void init_cluster_manager() {
   addr.sin_port = htons(CLUSTER_PORT);
 
   if (bind(master_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    // If we can't bind 7123, maybe another instance (drone) is running?
-    // We can still send commands but we won't receive Heartbeats well on same
-    // port. But Master needs to listen.
     perror("CLUSTER: Failed to bind Master Port 7123");
   }
 
