@@ -29,7 +29,29 @@ void trim_vendor(char *str) {
     }
 }
 
+void download_oui_db() {
+    printf("INFO: Checking OUI database...\n");
+    // Crée le dossier bin si nécessaire
+    system("mkdir -p bin");
+    
+    // Télécharge seulement si n'existe pas (-nc) et en silence (-q) mais montre progression si nouveau
+    // On utilise l'URL officielle. 
+    int ret = system("wget -nc -O bin/oui.txt http://standards-oui.ieee.org/oui/oui.txt >/dev/null 2>&1");
+    if (ret != 0) {
+        // En cas d'échec (ex: fichier existe déjà et wget retourne erreur, ou pas d'internet)
+        // On vérifie juste si le fichier est là.
+        FILE *f = fopen("bin/oui.txt", "r");
+        if (!f) {
+            printf("WARN: Failed to download OUI database. Check internet connection.\n");
+        } else {
+            fclose(f);
+        }
+    }
+}
+
 void init_oui_db() {
+    download_oui_db();
+
     FILE *f = fopen("bin/oui.txt", "r");
     if (!f) {
         printf("WARN: bin/oui.txt not found. Vendor lookup will be limited.\n");
