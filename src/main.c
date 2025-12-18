@@ -106,6 +106,9 @@ int main() {
     struct in_addr start_ip, end_ip;
     get_network_range(info.ip_addr_obj, info.netmask_obj, &start_ip, &end_ip);
 
+    // Initialisation DB OUI
+    init_oui_db();
+
     // Initialisation du contexte
     scan_context_t ctx;
     ctx.current_ip = ntohl(start_ip.s_addr);
@@ -143,5 +146,7 @@ int main() {
     pthread_mutex_destroy(&ctx.lock);
     pthread_mutex_destroy(&ctx.list_lock);
     
+    cleanup_oui_db();
+
     return 0;
 }
