@@ -408,8 +408,8 @@ void run_gui(scan_context_t *ctx) {
             pthread_mutex_unlock(&ctx->list_lock);
 
             // --- HUD OVERLAY ---
-            DrawRectangle(10, 10, 260, 110, Fade(BLACK, 0.8f));
-            DrawRectangleLines(10, 10, 260, 110, GetColor(0x334155FF)); 
+            DrawRectangle(10, 10, 260, 150, Fade(BLACK, 0.8f)); // Increased height
+            DrawRectangleLines(10, 10, 260, 150, GetColor(0x334155FF)); 
             
             DrawText("NETWORK MAP LIVE", 25, 20, 20, SKYBLUE);
             DrawLine(25, 45, 250, 45, GRAY);
@@ -418,7 +418,34 @@ void run_gui(scan_context_t *ctx) {
             snprintf(statStr, 64, "Devices: %d", count);
             DrawText(statStr, 25, 55, 20, WHITE);
 
-            DrawText("[L/R-Click]: MOVE | [Hover]: INFO", 25, 85, 10, LIGHTGRAY);
+            // Thread Controls
+            char threadStr[64];
+            if (ctx->is_updating) {
+                 snprintf(threadStr, 64, "Threads: %d (...)", ctx->next_thread_count);
+                 DrawText(threadStr, 25, 80, 20, ORANGE);
+            } else {
+                 snprintf(threadStr, 64, "Threads: %d", ctx->thread_count);
+                 DrawText(threadStr, 25, 80, 20, LIGHTGRAY);
+            }
+            
+            // +/- Buttons for threads
+            DrawRectangle(160, 80, 20, 20, DARKGRAY);
+            DrawText("-", 166, 81, 20, WHITE);
+            if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){160, 80, 20, 20})) {
+                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                     request_thread_update(ctx, ctx->thread_count - 5);
+                 }
+            }
+            
+            DrawRectangle(190, 80, 20, 20, DARKGRAY);
+            DrawText("+", 195, 81, 20, WHITE);
+              if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){190, 80, 20, 20})) {
+                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                     request_thread_update(ctx, ctx->thread_count + 5);
+                 }
+            }
+
+            DrawText("[L/R-Click]: MOVE | [Hover]: INFO", 25, 120, 10, LIGHTGRAY);
             
             DrawFPS(GetScreenWidth() - 80, 10);
 

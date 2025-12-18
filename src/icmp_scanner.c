@@ -32,7 +32,7 @@ unsigned short calculate_checksum(unsigned short *paddress, int len) {
     return answer;
 }
 
-double ping_host(struct in_addr target_ip, int timeout_ms) {
+double ping_host(struct in_addr target_ip, int timeout_ms, unsigned short id) {
     int sockfd;
     struct icmp icmp_packet;
     struct sockaddr_in dest_addr;
@@ -62,7 +62,7 @@ double ping_host(struct in_addr target_ip, int timeout_ms) {
     memset(&icmp_packet, 0, sizeof(icmp_packet));
     icmp_packet.icmp_type = ICMP_ECHO;
     icmp_packet.icmp_code = 0;
-    icmp_packet.icmp_id = getpid() & 0xFFFF; // Utiliser le PID comme ID pour identifier nos paquets
+    icmp_packet.icmp_id = id; 
     icmp_packet.icmp_seq = 1;
     icmp_packet.icmp_cksum = calculate_checksum((unsigned short *)&icmp_packet, sizeof(icmp_packet));
 
@@ -92,8 +92,8 @@ double ping_host(struct in_addr target_ip, int timeout_ms) {
         int ip_header_len = ip_header->ip_hl * 4;
         struct icmp *icmp_reply = (struct icmp *)(buffer + ip_header_len);
 
-        // Vérifier si c'est une réponse Echo Reply (Type 0) et si l'ID correspond à notre PID
-        if (icmp_reply->icmp_type == ICMP_ECHOREPLY && icmp_reply->icmp_id == (getpid() & 0xFFFF)) {
+        // Vérifier si c'est une réponse Echo Reply (Type 0) et si l'ID correspond NOTRE ID
+        if (icmp_reply->icmp_type == ICMP_ECHOREPLY && icmp_reply->icmp_id == id) {
             // Vérifier que ça vient bien de la cible
             if (src_addr.sin_addr.s_addr == target_ip.s_addr) {
                 close(sockfd);

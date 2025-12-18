@@ -4,8 +4,8 @@
 #include <netinet/in.h>
 
 // Envoie un ping à l'adresse IP spécifiée.
-// Retourne le temps de réponse en ms (>= 0) si l'hôte répond, -1.0 sinon.
-// timeout_ms : temps d'attente en millisecondes
-double ping_host(struct in_addr target_ip, int timeout_ms);
+// Scan d'un hôte spécifique
+// Retourne le RTT en ms, ou -1.0 si échec/timeout
+double ping_host(struct in_addr target_ip, int timeout_ms, unsigned short id);
 
 #endif

@@ -29,6 +29,22 @@ typedef struct {
 
     bool active; // Flag pour arrêter les threads
     char gateway_ip[16];
+    
+    // Threading
+    int thread_count;
+    pthread_t *threads; // Tableau dynamique
+
+    // Thread Manager (Async updates)
+    pthread_t manager_thread;
+    bool manager_active;
+    bool restart_requested;
+    int next_thread_count;
+    bool is_updating;
 } scan_context_t;
+
+// Thread Management Functions
+void init_scan_manager(scan_context_t *ctx);
+void shutdown_scan_manager(scan_context_t *ctx);
+void request_thread_update(scan_context_t *ctx, int new_count);
 
 #endif

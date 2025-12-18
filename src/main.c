@@ -10,147 +10,13 @@
 #include "scan_context.h"
 #include "gui.h"
 
-#define MAX_THREADS 50
-
-// Thread de scan révisé
-void *scan_thread(void *arg) {
-    scan_context_t *ctx = (scan_context_t *)arg;
-    
-    while (ctx->active) {
-        struct in_addr target_ip;
-        
-        // Récupérer la prochaine IP à scanner
-        pthread_mutex_lock(&ctx->lock);
-        if (ctx->current_ip > ctx->end_ip) {
-            // Fin du pass. On reset pour scanner en continu (Live Update)
-            pthread_mutex_unlock(&ctx->lock);
-            
-            // On attend
-            usleep(2000000); // 2 sec pause
-            
-            pthread_mutex_lock(&ctx->lock);
-            if (ctx->current_ip > ctx->end_ip) { 
-                // Reset du scan
-                ctx->current_ip = ctx->start_ip_val;
-            }
-            pthread_mutex_unlock(&ctx->lock);
-            continue;
-        }
-        target_ip.s_addr = htonl(ctx->current_ip);
-        ctx->current_ip++;
-        pthread_mutex_unlock(&ctx->lock);
-
-        // Check active again
-        if (!ctx->active) break;
-
-        // Scan ICMP
-        double rtt = ping_host(target_ip, 500); // 500ms timeout
-        int discovered = 0;
-        char mac_check[18];
-        char ip_str_temp[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &target_ip, ip_str_temp, INET_ADDRSTRLEN);
-
-        if (rtt >= 0) { 
-            discovered = 1;
-        } else {
-            // Tentative de fallback ARP (si firewall bloque ICMP)
-            // L'envoi du ping a forcé une requête ARP par le noyau.
-            get_device_mac(ip_str_temp, mac_check, sizeof(mac_check));
-            if (strcmp(mac_check, "??:??:??:??:??:??") != 0 && 
-                strcmp(mac_check, "00:00:00:00:00:00") != 0 &&
-                strcmp(mac_check, "00:00:00:00:00:00") != 0) { // Check double zero just in case
-                
-                discovered = 1;
-                rtt = 50.0; // Latence artificielle pour les devices bloqués
-                // On peut le marquer visuellement plus tard si on veut
-            }
-        }
-
-        // Check if device already exists in list to update status
-        int existing_idx = -1;
-        pthread_mutex_lock(&ctx->list_lock);
-        for(int i=0; i<ctx->device_count; i++) {
-             if(strcmp(ctx->devices[i].ip_str, ip_str_temp) == 0) {
-                 existing_idx = i;
-                 break;
-             }
-        }
-        pthread_mutex_unlock(&ctx->list_lock);
-
-        if (discovered) { 
-            // If exists, update
-            if (existing_idx != -1) {
-                pthread_mutex_lock(&ctx->list_lock);
-                ctx->devices[existing_idx].active = 1;
-                ctx->devices[existing_idx].rtt_ms = rtt;
-                ctx->devices[existing_idx].missed_scans = 0;
-                pthread_mutex_unlock(&ctx->list_lock);
-            } else {
-                // New Device
-                device_t new_device;
-                memset(&new_device, 0, sizeof(device_t)); // Safe init
-                new_device.ip_addr = target_ip;
-                new_device.active = 1;
-                new_device.rtt_ms = rtt;
-                new_device.missed_scans = 0;
-                strcpy(new_device.ip_str, ip_str_temp);
-                
-                // Si l'app est fermée entre temps
-                if (!ctx->active) break;
-
-                // Récupération des infos supplémentaires
-                get_device_hostname(target_ip, new_device.hostname, sizeof(new_device.hostname));
-                get_device_mac(new_device.ip_str, new_device.mac_addr, sizeof(new_device.mac_addr));
-
-                if (strcmp(new_device.hostname, "Inconnu") == 0) {
-                    char vendor[64];
-                    get_mac_vendor(new_device.mac_addr, vendor, sizeof(vendor));
-                    if (strlen(vendor) > 0) {
-                        snprintf(new_device.hostname, sizeof(new_device.hostname), "%s Device", vendor);
-                    }
-                }
-
-                // Ajout à la liste
-                pthread_mutex_lock(&ctx->list_lock);
-                if (ctx->device_count < MAX_DEVICES) {
-                     ctx->devices[ctx->device_count] = new_device;
-                     // Init GUI props
-                     ctx->gui_props[ctx->device_count].x = 0;
-                     ctx->gui_props[ctx->device_count].y = 0;
-                     ctx->device_count++;
-                     printf("[+] Trouvé: %-15s | %s\n", new_device.ip_str, new_device.hostname);
-                }
-                pthread_mutex_unlock(&ctx->list_lock);
-            }
-        } else {
-            // Not discovered (Ping/Arp failed)
-            // If it existed, we mark missed scan
-             if (existing_idx != -1) {
-                pthread_mutex_lock(&ctx->list_lock);
-                ctx->devices[existing_idx].missed_scans++;
-                // If missed > 2 scans (approx 1 pass if quick, or multiple), mark inactive
-                // Since we scan continuously, this might happen fast or slow depending on subnet size.
-                // Let's say 3 misses = inactive.
-                if (ctx->devices[existing_idx].missed_scans > 2) {
-                    if (ctx->devices[existing_idx].active) {
-                        printf("[-] Perdu:  %-15s\n", ctx->devices[existing_idx].ip_str);
-                    }
-                    ctx->devices[existing_idx].active = 0;
-                    ctx->devices[existing_idx].rtt_ms = 999.0; // High latency visual
-                }
-                pthread_mutex_unlock(&ctx->list_lock);
-            }
-        }
-    }
-    return NULL;
-}
+#define MAX_THREADS 255
 
 int main(int argc, char *argv[]) {
     if (geteuid() != 0) {
         printf("INFO: Elevation required. Restarting with sudo...\n");
         
         // Prepare argument list for execvp
-        // "sudo", "./bin/network-map", args..., NULL
         char **new_argv = malloc(sizeof(char *) * (argc + 2));
         new_argv[0] = "sudo";
         for (int i = 0; i < argc; i++) {
@@ -164,6 +30,22 @@ int main(int argc, char *argv[]) {
         perror("sudo execvp");
         free(new_argv);
         return 1;
+    }
+
+    // --- CLI PARSING ---
+    int thread_count = 50; // default
+    int opt;
+    while ((opt = getopt(argc, argv, "t:")) != -1) {
+        switch (opt) {
+        case 't':
+            thread_count = atoi(optarg);
+            if (thread_count < 1) thread_count = 1;
+            if (thread_count > 255) thread_count = 255;
+            break;
+        default:
+            fprintf(stderr, "Usage: %s [-t threads]\n", argv[0]);
+            return 1;
+        }
     }
 
     printf("=== Network Map Live (Raylib) ===\n");
@@ -182,11 +64,13 @@ int main(int argc, char *argv[]) {
 
     // Initialisation du contexte
     scan_context_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
     ctx.start_ip_val = ntohl(start_ip.s_addr);
     ctx.current_ip = ntohl(start_ip.s_addr);
     ctx.end_ip = ntohl(end_ip.s_addr);
     ctx.device_count = 0;
     ctx.active = true;
+    ctx.thread_count = thread_count;
     
     // Gateway
     if (get_gateway_ip(ctx.gateway_ip) != 0) {
@@ -196,24 +80,14 @@ int main(int argc, char *argv[]) {
     pthread_mutex_init(&ctx.lock, NULL);
     pthread_mutex_init(&ctx.list_lock, NULL);
 
-    // Lancement des threads de scan
-    pthread_t threads[MAX_THREADS];
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (pthread_create(&threads[i], NULL, scan_thread, &ctx) != 0) {
-            perror("pthread_create");
-        }
-    }
+    // Lancement du manager (qui lance les threads)
+    init_scan_manager(&ctx);
 
     // Lancement de la GUI (Bloquant jusqu'à la fermeture de la fenêtre)
     run_gui(&ctx);
 
     // Fermeture
-    printf("Arrêt des scans...\n");
-    ctx.active = false; 
-    
-    for (int i = 0; i < MAX_THREADS; i++) {
-        pthread_join(threads[i], NULL);
-    }
+    shutdown_scan_manager(&ctx);
 
     pthread_mutex_destroy(&ctx.lock);
     pthread_mutex_destroy(&ctx.list_lock);
