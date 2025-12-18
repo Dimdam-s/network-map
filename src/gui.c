@@ -214,7 +214,14 @@ void run_gui(scan_context_t *ctx) {
                      if (i == gateway_idx) {
                          DrawText("GATEWAY", pos.x - 30, pos.y - 35, 10, GOLD);
                      } else if (camera.zoom > 0.5f || i == hoveredNode) {
-                         DrawText(ctx->devices[i].ip_str, pos.x - 30, pos.y + 20, 10, RAYWHITE);
+                         const char *label = ctx->devices[i].ip_str;
+                         // Si on a un nom valide et différent de l'IP, on l'utilise
+                         if (strlen(ctx->devices[i].hostname) > 0 && 
+                             strcmp(ctx->devices[i].hostname, "Inconnu") != 0 && 
+                             strcmp(ctx->devices[i].hostname, ctx->devices[i].ip_str) != 0) {
+                             label = ctx->devices[i].hostname;
+                         }
+                         DrawText(label, pos.x - 30, pos.y + 20, 10, RAYWHITE);
                      }
                  }
 
