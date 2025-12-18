@@ -1,5 +1,7 @@
 #include "gui.h"
+#include "gui.h"
 #include "dns_spoofer.h"
+#include "cluster.h"
 #include <raylib.h>
 #include <raymath.h>
 #include <stdio.h>
@@ -375,6 +377,22 @@ void run_gui(scan_context_t *ctx) {
                  }
             }
 
+            // Drones Status
+            int dCount = get_drone_count();
+            char droneStr[64];
+            snprintf(droneStr, 64, "Drones: %d", dCount);
+            DrawText(droneStr, 25, 105, 10, dCount > 0 ? GREEN : DARKGRAY);
+            
+            // Re-Scan Button
+            if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){100, 105, 50, 10})) {
+                 DrawText("[SCAN]", 100, 105, 10, WHITE);
+                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                      discover_drones();
+                 }
+            } else {
+                 DrawText("[SCAN]", 100, 105, 10, GRAY);
+            }
+
             DrawText("[L/R-Click]: MOVE | [Hover]: INFO", 25, 120, 10, LIGHTGRAY);
             
             DrawFPS(GetScreenWidth() - 80, 10);
@@ -451,6 +469,21 @@ void run_gui(scan_context_t *ctx) {
                              stop_spoofing(&ctx->devices[selectedNode]);
                          }
                      }
+                 }
+                 
+                 // --- CLUSTER ATTACK ---
+                 int dCount = get_drone_count();
+                 if (dCount > 0) {
+                     DrawRectangle(mX + 20, mY + 260, 360, 30, Fade(MAROON, 0.9f));
+                     DrawText(TextFormat("LAUNCH CLUSTER ATTACK (%d Drones)", dCount), mX + 50, mY + 268, 10, WHITE);
+                     
+                     if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){mX + 20, mY + 260, 360, 30})) {
+                          if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                              send_cluster_attack(ctx->devices[selectedNode].ip_str);
+                          }
+                     }
+                 } else {
+                     DrawText("No Drones available for Cluster Attack", mX + 20, mY + 268, 10, DARKGRAY);
                  }
                  
                  DrawText("X", mX + mW - 25, mY + 10, 20, RED);
