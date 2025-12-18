@@ -17,6 +17,7 @@ typedef struct {
 } device_gui_props_t;
 
 typedef struct {
+    uint32_t start_ip_val; // Pour reset le loop
     uint32_t current_ip;
     uint32_t end_ip;
     pthread_mutex_t lock;

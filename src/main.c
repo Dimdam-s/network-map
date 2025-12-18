@@ -22,12 +22,19 @@ void *scan_thread(void *arg) {
         // Récupérer la prochaine IP à scanner
         pthread_mutex_lock(&ctx->lock);
         if (ctx->current_ip > ctx->end_ip) {
-            // Si on a fini le scan, on arrête pour l'instant
+            // Fin du pass. On reset pour scanner en continu (Live Update)
             pthread_mutex_unlock(&ctx->lock);
             
-            // Attendre un peu avant de tuer le thread
-            usleep(100000); 
-            break; 
+            // On attend
+            usleep(2000000); // 2 sec pause
+            
+            pthread_mutex_lock(&ctx->lock);
+            if (ctx->current_ip > ctx->end_ip) { 
+                // Reset du scan
+                ctx->current_ip = ctx->start_ip_val;
+            }
+            pthread_mutex_unlock(&ctx->lock);
+            continue;
         }
         target_ip.s_addr = htonl(ctx->current_ip);
         ctx->current_ip++;
@@ -36,14 +43,35 @@ void *scan_thread(void *arg) {
         // Check active again
         if (!ctx->active) break;
 
-        // Scan
+        // Scan ICMP
         double rtt = ping_host(target_ip, 500); // 500ms timeout
+        int discovered = 0;
+        char mac_check[18];
+        char ip_str_temp[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &target_ip, ip_str_temp, INET_ADDRSTRLEN);
+
         if (rtt >= 0) { 
+            discovered = 1;
+        } else {
+            // Tentative de fallback ARP (si firewall bloque ICMP)
+            // L'envoi du ping a forcé une requête ARP par le noyau.
+            get_device_mac(ip_str_temp, mac_check, sizeof(mac_check));
+            if (strcmp(mac_check, "??:??:??:??:??:??") != 0 && 
+                strcmp(mac_check, "00:00:00:00:00:00") != 0 &&
+                strcmp(mac_check, "00:00:00:00:00:00") != 0) { // Check double zero just in case
+                
+                discovered = 1;
+                rtt = 50.0; // Latence artificielle pour les devices bloqués
+                // On peut le marquer visuellement plus tard si on veut
+            }
+        }
+
+        if (discovered) { 
             device_t new_device;
             new_device.ip_addr = target_ip;
             new_device.active = 1;
             new_device.rtt_ms = rtt;
-            inet_ntop(AF_INET, &target_ip, new_device.ip_str, INET_ADDRSTRLEN);
+            strcpy(new_device.ip_str, ip_str_temp);
             
             // Si l'app est fermée entre temps
             if (!ctx->active) break;
@@ -111,6 +139,7 @@ int main() {
 
     // Initialisation du contexte
     scan_context_t ctx;
+    ctx.start_ip_val = ntohl(start_ip.s_addr);
     ctx.current_ip = ntohl(start_ip.s_addr);
     ctx.end_ip = ntohl(end_ip.s_addr);
     ctx.device_count = 0;

@@ -113,9 +113,24 @@ void run_gui(scan_context_t *ctx) {
                 force = Vector2Add(force, Vector2Scale(Vector2Normalize(diff), displacement * SPRING_FORCE));
             }
 
+            if (dt > 0.05f) dt = 0.05f; // Cap à 20 FPS min pour éviter explosion physique
+
             // Apply
-            ctx->gui_props[i].target_x += force.x * dt * 40.0f;
-            ctx->gui_props[i].target_y += force.y * dt * 40.0f;
+            float moveX = force.x * dt * 40.0f;
+            float moveY = force.y * dt * 40.0f;
+            
+            // Verif NaN
+            if (isnan(moveX) || isinf(moveX)) moveX = 0;
+            if (isnan(moveY) || isinf(moveY)) moveY = 0;
+
+            ctx->gui_props[i].target_x += moveX;
+            ctx->gui_props[i].target_y += moveY;
+            
+            // Safety Check Limit
+            if (ctx->gui_props[i].target_x > 20000) ctx->gui_props[i].target_x = 20000;
+            if (ctx->gui_props[i].target_x < -20000) ctx->gui_props[i].target_x = -20000;
+            if (ctx->gui_props[i].target_y > 20000) ctx->gui_props[i].target_y = 20000;
+            if (ctx->gui_props[i].target_y < -20000) ctx->gui_props[i].target_y = -20000;
         }
 
         // Integration (Lerp vers target)

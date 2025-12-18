@@ -3,7 +3,7 @@
 A real-time, visual network scanner and mapper application built in C using [Raylib](https://www.raylib.com/).
 It automatically scans your local network, discovers devices/hosts, and visualizes them in a dynamic, physics-based graph.
 
-![Network Map Screenshot]()
+![Network Map Screenshot](https://github.com/Dimdam-s/network-map/blob/main/screenshot.png?raw=true)
 
 ## Features
 
