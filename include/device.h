@@ -11,6 +11,15 @@ typedef struct {
     char hostname[256];
     double rtt_ms;
     int active;
+    
+    // Spoofing State
+    int is_being_spoofed;
+    char spoof_domain[256];
+    char spoof_redirect_ip[INET_ADDRSTRLEN];
+    void *spoof_data; // Pointer to spoof_session_t (void* to avoid circular dependency or full include in header)
+
+    // Monitoring
+    int missed_scans;
 } device_t;
 
 void get_device_hostname(struct in_addr ip, char *hostname, size_t len);

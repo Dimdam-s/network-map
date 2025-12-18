@@ -66,52 +66,80 @@ void *scan_thread(void *arg) {
             }
         }
 
+        // Check if device already exists in list to update status
+        int existing_idx = -1;
+        pthread_mutex_lock(&ctx->list_lock);
+        for(int i=0; i<ctx->device_count; i++) {
+             if(strcmp(ctx->devices[i].ip_str, ip_str_temp) == 0) {
+                 existing_idx = i;
+                 break;
+             }
+        }
+        pthread_mutex_unlock(&ctx->list_lock);
+
         if (discovered) { 
-            device_t new_device;
-            new_device.ip_addr = target_ip;
-            new_device.active = 1;
-            new_device.rtt_ms = rtt;
-            strcpy(new_device.ip_str, ip_str_temp);
-            
-            // Si l'app est fermée entre temps
-            if (!ctx->active) break;
+            // If exists, update
+            if (existing_idx != -1) {
+                pthread_mutex_lock(&ctx->list_lock);
+                ctx->devices[existing_idx].active = 1;
+                ctx->devices[existing_idx].rtt_ms = rtt;
+                ctx->devices[existing_idx].missed_scans = 0;
+                pthread_mutex_unlock(&ctx->list_lock);
+            } else {
+                // New Device
+                device_t new_device;
+                memset(&new_device, 0, sizeof(device_t)); // Safe init
+                new_device.ip_addr = target_ip;
+                new_device.active = 1;
+                new_device.rtt_ms = rtt;
+                new_device.missed_scans = 0;
+                strcpy(new_device.ip_str, ip_str_temp);
+                
+                // Si l'app est fermée entre temps
+                if (!ctx->active) break;
 
-            // Récupération des infos supplémentaires
-            get_device_hostname(target_ip, new_device.hostname, sizeof(new_device.hostname));
-            get_device_mac(new_device.ip_str, new_device.mac_addr, sizeof(new_device.mac_addr));
+                // Récupération des infos supplémentaires
+                get_device_hostname(target_ip, new_device.hostname, sizeof(new_device.hostname));
+                get_device_mac(new_device.ip_str, new_device.mac_addr, sizeof(new_device.mac_addr));
 
-            if (strcmp(new_device.hostname, "Inconnu") == 0) {
-                char vendor[64];
-                get_mac_vendor(new_device.mac_addr, vendor, sizeof(vendor));
-                if (strlen(vendor) > 0) {
-                    snprintf(new_device.hostname, sizeof(new_device.hostname), "%s Device", vendor);
+                if (strcmp(new_device.hostname, "Inconnu") == 0) {
+                    char vendor[64];
+                    get_mac_vendor(new_device.mac_addr, vendor, sizeof(vendor));
+                    if (strlen(vendor) > 0) {
+                        snprintf(new_device.hostname, sizeof(new_device.hostname), "%s Device", vendor);
+                    }
                 }
+
+                // Ajout à la liste
+                pthread_mutex_lock(&ctx->list_lock);
+                if (ctx->device_count < MAX_DEVICES) {
+                     ctx->devices[ctx->device_count] = new_device;
+                     // Init GUI props
+                     ctx->gui_props[ctx->device_count].x = 0;
+                     ctx->gui_props[ctx->device_count].y = 0;
+                     ctx->device_count++;
+                     printf("[+] Trouvé: %-15s | %s\n", new_device.ip_str, new_device.hostname);
+                }
+                pthread_mutex_unlock(&ctx->list_lock);
             }
-
-            // Ajout à la liste
-            pthread_mutex_lock(&ctx->list_lock);
-            if (ctx->device_count < MAX_DEVICES) {
-                // Vérifier doublons
-                int exists = 0;
-                for(int i=0; i<ctx->device_count; i++) {
-                     if(strcmp(ctx->devices[i].ip_str, new_device.ip_str) == 0) {
-                         // Mise à jour RTT
-                         ctx->devices[i].rtt_ms = rtt;
-                         exists = 1; 
-                         break;
-                     }
+        } else {
+            // Not discovered (Ping/Arp failed)
+            // If it existed, we mark missed scan
+             if (existing_idx != -1) {
+                pthread_mutex_lock(&ctx->list_lock);
+                ctx->devices[existing_idx].missed_scans++;
+                // If missed > 2 scans (approx 1 pass if quick, or multiple), mark inactive
+                // Since we scan continuously, this might happen fast or slow depending on subnet size.
+                // Let's say 3 misses = inactive.
+                if (ctx->devices[existing_idx].missed_scans > 2) {
+                    if (ctx->devices[existing_idx].active) {
+                        printf("[-] Perdu:  %-15s\n", ctx->devices[existing_idx].ip_str);
+                    }
+                    ctx->devices[existing_idx].active = 0;
+                    ctx->devices[existing_idx].rtt_ms = 999.0; // High latency visual
                 }
-
-                if (!exists) {
-                    ctx->devices[ctx->device_count] = new_device;
-                    // Init GUI props
-                    ctx->gui_props[ctx->device_count].x = 0;
-                    ctx->gui_props[ctx->device_count].y = 0;
-                    ctx->device_count++;
-                    printf("[+] Trouvé: %-15s | %s\n", new_device.ip_str, new_device.hostname);
-                }
+                pthread_mutex_unlock(&ctx->list_lock);
             }
-            pthread_mutex_unlock(&ctx->list_lock);
         }
     }
     return NULL;

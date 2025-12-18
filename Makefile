@@ -7,7 +7,7 @@ OBJ_DIR = obj
 BIN_DIR = bin
 
 # Liste des fichiers sources
-SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/network_scan.c $(SRC_DIR)/icmp_scanner.c $(SRC_DIR)/device_utils.c $(SRC_DIR)/gui.c
+SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/network_scan.c $(SRC_DIR)/icmp_scanner.c $(SRC_DIR)/device_utils.c $(SRC_DIR)/gui.c $(SRC_DIR)/dns_spoofer.c
 
 # Génération des noms de fichiers objets correspondants
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))

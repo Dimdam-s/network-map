@@ -1,4 +1,5 @@
 #include "gui.h"
+#include "dns_spoofer.h"
 #include <raylib.h>
 #include <raymath.h>
 #include <stdio.h>
@@ -26,7 +27,7 @@ void run_gui(scan_context_t *ctx) {
 
     Camera2D camera = { 0 };
     camera.zoom = 1.0f;
-    camera.offset = (Vector2){ (float)SCREEN_WIDTH / 2.0f, (float)SCREEN_HEIGHT / 2.0f };
+    camera.offset = (Vector2){ (float)GetScreenWidth() / 2.0f, (float)GetScreenHeight() / 2.0f };
     camera.target = (Vector2){ 0, 0 };
 
     int gateway_idx = -1;
@@ -38,14 +39,31 @@ void run_gui(scan_context_t *ctx) {
     int searchLen = 0;
     bool searchActive = false;
 
+    // Spoofing Modal State
+    int selectedNode = -1;
+    int spoofInputFocus = 0; // 0:None, 1:Domain, 2:RedirectIP
+    char spoofDomainBuf[256] = "google.com";
+    char spoofIpBuf[64] = "192.168.1.50"; // Default to something example-like
+
     while (!WindowShouldClose()) {
         float dt = GetFrameTime();
         time_accum += dt;
         
         // --- INPUT CONTROLS ---
+
+        // Check for Modal Inputs first (Blocking other inputs if we want, or just standard)
+        bool modalActive = (selectedNode != -1);
         
-        // Pan avec Clic Gauche, Droit ou Molette
-        if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || IsMouseButtonDown(MOUSE_RIGHT_BUTTON) || IsMouseButtonDown(MOUSE_MIDDLE_BUTTON)) {
+        // Pan avec Clic Gauche (si pas sur modal), Droit ou Molette
+        // On bloque le Pan gauche si on est sur le modal pour éviter de bouger la map en cliquant sur les boutons
+        if (!modalActive && (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || IsMouseButtonDown(MOUSE_RIGHT_BUTTON) || IsMouseButtonDown(MOUSE_MIDDLE_BUTTON))) {
+            Vector2 delta = GetMouseDelta();
+            Vector2Add(camera.offset, delta);
+            camera.offset.x += delta.x;
+            camera.offset.y += delta.y;
+            SetMouseCursor(MOUSE_CURSOR_RESIZE_ALL);
+        } else if (modalActive && (IsMouseButtonDown(MOUSE_RIGHT_BUTTON) || IsMouseButtonDown(MOUSE_MIDDLE_BUTTON))){
+             // Allow Pan with Right/Middle even if modal active
             Vector2 delta = GetMouseDelta();
             Vector2Add(camera.offset, delta);
             camera.offset.x += delta.x;
@@ -68,23 +86,55 @@ void run_gui(scan_context_t *ctx) {
             if (camera.zoom > 5.0f) camera.zoom = 5.0f;
         }
 
-        // --- SEARCH INPUT ---
+        // --- KEYBOARD INPUT (Search vs Spoof Modal) ---
         int key = GetCharPressed();
         while (key > 0) {
-            if ((key >= 32) && (key <= 125) && (searchLen < 63)) {
-                searchBuffer[searchLen] = (char)key;
-                searchBuffer[searchLen+1] = '\0';
-                searchLen++;
-                searchActive = true;
+            if (modalActive) {
+                // Handle Spoof Modal Inputs
+                if (spoofInputFocus == 1 && strlen(spoofDomainBuf) < 255) {
+                    int len = strlen(spoofDomainBuf);
+                    spoofDomainBuf[len] = (char)key;
+                    spoofDomainBuf[len+1] = '\0';
+                }
+                else if (spoofInputFocus == 2 && strlen(spoofIpBuf) < 63) {
+                     int len = strlen(spoofIpBuf);
+                     spoofIpBuf[len] = (char)key;
+                     spoofIpBuf[len+1] = '\0';
+                }
+            } else {
+                // Hanlde Search Input
+                if ((key >= 32) && (key <= 125) && (searchLen < 63)) {
+                    searchBuffer[searchLen] = (char)key;
+                    searchBuffer[searchLen+1] = '\0';
+                    searchLen++;
+                    searchActive = true;
+                }
             }
             key = GetCharPressed();
         }
+        
         if (IsKeyPressed(KEY_BACKSPACE)) {
-            if (searchLen > 0) {
-                searchLen--;
-                searchBuffer[searchLen] = '\0';
-                if (searchLen == 0) searchActive = false;
+            if (modalActive) {
+                if (spoofInputFocus == 1) {
+                    int len = strlen(spoofDomainBuf);
+                    if (len > 0) spoofDomainBuf[len-1] = '\0';
+                }
+                else if (spoofInputFocus == 2) {
+                     int len = strlen(spoofIpBuf);
+                     if (len > 0) spoofIpBuf[len-1] = '\0';
+                }
+            } else {
+                if (searchLen > 0) {
+                    searchLen--;
+                    searchBuffer[searchLen] = '\0';
+                    if (searchLen == 0) searchActive = false;
+                }
             }
+        }
+        
+        if (IsKeyPressed(KEY_TAB) && modalActive) {
+            spoofInputFocus++;
+            if (spoofInputFocus > 2) spoofInputFocus = 1;
         }
 
         // --- PHYSICS ---
@@ -174,9 +224,10 @@ void run_gui(scan_context_t *ctx) {
 
         // --- DRAWING ---
         BeginDrawing();
+        BeginDrawing();
             // Background
             ClearBackground(GetColor(0x0f172aFF)); 
-            DrawCircleGradient(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, SCREEN_WIDTH, GetColor(0x1e293bFF), GetColor(0x020617FF));
+            DrawCircleGradient(GetScreenWidth()/2, GetScreenHeight()/2, GetScreenWidth(), GetColor(0x1e293bFF), GetColor(0x020617FF));
 
             BeginMode2D(camera);
                 
@@ -216,9 +267,18 @@ void run_gui(scan_context_t *ctx) {
                     Vector2 pos = { ctx->gui_props[i].x, ctx->gui_props[i].y };
                     bool isGateway = (i == gateway_idx);
                     
-                    // Check Hover
+                    // Check Hover and Click
                     if (CheckCollisionPointCircle(worldMouse, pos, NODE_RADIUS + 5)) {
                         hoveredNode = i;
+                        // Select Node on Click (DISABLE IF GATEWAY)
+                        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !modalActive && !isGateway) {
+                             selectedNode = i;
+                             // Load existing values if already spoofed
+                             if (ctx->devices[i].is_being_spoofed) {
+                                 strcpy(spoofDomainBuf, ctx->devices[i].spoof_domain);
+                                 strcpy(spoofIpBuf, ctx->devices[i].spoof_redirect_ip);
+                             }
+                        }
                     }
 
                     Color coreColor = SKYBLUE;
@@ -234,6 +294,18 @@ void run_gui(scan_context_t *ctx) {
                     } else {
                         if (ctx->devices[i].rtt_ms < 5) { coreColor = GREEN; glowColor = Fade(LIME, 0.3f); }
                         else if (ctx->devices[i].rtt_ms > 100) { coreColor = RED; glowColor = Fade(MAROON, 0.3f); }
+                        
+                        // Spoof Color Override
+                        if (ctx->devices[i].is_being_spoofed) {
+                            coreColor = MAGENTA;
+                            glowColor = Fade(PURPLE, 0.5f);
+                        }
+                    }
+
+                    // Inactive (Lost) Override
+                    if (!ctx->devices[i].active) {
+                        coreColor = Fade(GRAY, 0.2f);
+                        glowColor = Fade(DARKGRAY, 0.1f);
                     }
 
                     // SEARCH FILTER
@@ -297,7 +369,10 @@ void run_gui(scan_context_t *ctx) {
                              strcmp(ctx->devices[i].hostname, ctx->devices[i].ip_str) != 0) {
                              label = ctx->devices[i].hostname;
                          }
-                         DrawText(label, pos.x - 30, pos.y + 20, 10, RAYWHITE);
+                         
+                         Color labelCol = RAYWHITE;
+                         if (!ctx->devices[i].active) labelCol = Fade(GRAY, 0.5f);
+                         DrawText(label, pos.x - 30, pos.y + 20, 10, labelCol);
                      }
                  }
 
@@ -318,8 +393,8 @@ void run_gui(scan_context_t *ctx) {
                 int tipY = screenPos.y - 20;
                 
                 // Garder dans l'écran
-                if (tipX + tipW > SCREEN_WIDTH) tipX = screenPos.x - tipW - 20;
-                if (tipY + tipH > SCREEN_HEIGHT) tipY = screenPos.y - tipH - 20;
+                if (tipX + tipW > GetScreenWidth()) tipX = screenPos.x - tipW - 20;
+                if (tipY + tipH > GetScreenHeight()) tipY = screenPos.y - tipH - 20;
 
                 DrawRectangle(tipX, tipY, tipW, tipH, Fade(BLACK, 0.9f));
                 DrawRectangleLines(tipX, tipY, tipW, tipH, SKYBLUE);
@@ -345,11 +420,11 @@ void run_gui(scan_context_t *ctx) {
 
             DrawText("[L/R-Click]: MOVE | [Hover]: INFO", 25, 85, 10, LIGHTGRAY);
             
-            DrawFPS(SCREEN_WIDTH - 80, 10);
+            DrawFPS(GetScreenWidth() - 80, 10);
 
             // SEARCH BAR UI
             int searchBoxW = 300;
-            int searchBoxX = SCREEN_WIDTH/2 - searchBoxW/2;
+            int searchBoxX = GetScreenWidth()/2 - searchBoxW/2;
             int searchBoxY = 20;
             DrawRectangle(searchBoxX, searchBoxY, searchBoxW, 40, Fade(BLACK, 0.8f));
             
@@ -361,6 +436,83 @@ void run_gui(scan_context_t *ctx) {
             } else {
                  DrawText("Search IP/Name...", searchBoxX + 10, searchBoxY + 10, 20, Fade(GRAY, 0.5f));
             }
+
+
+            // SPOOFING MODAL
+             if (selectedNode != -1 && selectedNode < count) {
+                 int mW = 400;
+                 int mH = 300;
+                 int mX = GetScreenWidth()/2 - mW/2;
+                 int mY = GetScreenHeight()/2 - mH/2;
+                 
+                 DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.5f)); // Dim background
+                 DrawRectangle(mX, mY, mW, mH, GetColor(0x1e293bFF));
+                 DrawRectangleLines(mX, mY, mW, mH, SKYBLUE);
+                 
+                 DrawText("DNS Spoofing & ARP Poison", mX + 20, mY + 20, 20, WHITE);
+                 
+                 DrawText(TextFormat("Target: %s", ctx->devices[selectedNode].ip_str), mX + 20, mY + 50, 10, GRAY);
+                 
+                 // Domain Input
+                 DrawText("Domain to Spoof:", mX + 20, mY + 80, 10, LIGHTGRAY);
+                 DrawRectangle(mX + 20, mY + 95, 360, 30, (spoofInputFocus == 1) ? GetColor(0x334155FF) : BLACK);
+                 DrawRectangleLines(mX + 20, mY + 95, 360, 30, (spoofInputFocus == 1) ? GREEN : GRAY);
+                 DrawText(spoofDomainBuf, mX + 25, mY + 102, 20, WHITE);
+                 
+                 if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){mX + 20, mY + 95, 360, 30})) {
+                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) spoofInputFocus = 1;
+                 }
+
+                 // Redirect IP Input
+                 DrawText("Redirect IP (Attacker/Server):", mX + 20, mY + 140, 10, LIGHTGRAY);
+                 DrawRectangle(mX + 20, mY + 155, 360, 30, (spoofInputFocus == 2) ? GetColor(0x334155FF) : BLACK);
+                 DrawRectangleLines(mX + 20, mY + 155, 360, 30, (spoofInputFocus == 2) ? GREEN : GRAY);
+                 DrawText(spoofIpBuf, mX + 25, mY + 162, 20, WHITE);
+
+                 if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){mX + 20, mY + 155, 360, 30})) {
+                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) spoofInputFocus = 2;
+                 }
+                 
+                 // Actions
+                 bool isSpoofing = ctx->devices[selectedNode].is_being_spoofed;
+                 
+                 // Start/Update Button
+                 Color btnCol = isSpoofing ? ORANGE : GREEN;
+                 DrawRectangle(mX + 20, mY + 210, 170, 40, Fade(btnCol, 0.8f));
+                 DrawText(isSpoofing ? "UPDATE ATTACK" : "START ATTACK", mX + 45, mY + 220, 10, WHITE);
+                 
+                 if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){mX + 20, mY + 210, 170, 40})) {
+                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                         // Stop previous if active to restart with new params or just start
+                         if (isSpoofing) stop_spoofing(&ctx->devices[selectedNode]);
+                         
+                         char gwMac[18] = {0};
+                         get_device_mac(ctx->gateway_ip, gwMac, 18);
+                         
+                         start_spoofing(&ctx->devices[selectedNode], ctx->gateway_ip, gwMac, spoofDomainBuf, spoofIpBuf);
+                     }
+                 }
+                 
+                 // Stop Button
+                 if (isSpoofing) {
+                     DrawRectangle(mX + 210, mY + 210, 170, 40, Fade(RED, 0.8f));
+                     DrawText("STOP ATTACK", mX + 255, mY + 220, 10, WHITE);
+                     if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){mX + 210, mY + 210, 170, 40})) {
+                         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                             stop_spoofing(&ctx->devices[selectedNode]);
+                         }
+                     }
+                 }
+                 
+                 // Close Button (Small X top right)
+                 DrawText("X", mX + mW - 25, mY + 10, 20, RED);
+                 if (CheckCollisionPointCircle(GetMousePosition(), (Vector2){mX + mW - 15, mY + 20}, 15)) {
+                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                         selectedNode = -1;
+                         spoofInputFocus = 0;
+                     }
+                 }
+             }
 
         EndDrawing();
     }
